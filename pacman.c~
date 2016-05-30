@@ -1,0 +1,986 @@
+#include <stdio.h>
+#include <SDL/SDL.h>
+#include <SDL/SDL_image.h>
+#include <assert.h>
+#include <emscripten.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <math.h>
+#include <time.h>
+enum { WIDTH = 16 };
+enum { HEIGHT = 12 };
+enum { ELMTSIZE = 34 };
+
+enum { EMPTY, WALL, GEM, NENT };
+
+int level1[HEIGHT][WIDTH] = {
+0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 
+0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 
+0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 
+0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 
+1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 
+0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 
+0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 
+0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 
+};
+typedef struct {
+  int x;
+  int y;
+} Entity;
+
+
+enum {LEVEL1, GAMEOVER, NSCREEN};
+
+typedef struct {
+    int screen;
+    SDL_Surface* img_screen;
+    SDL_Surface* img_fond;
+    SDL_Surface* img_wall;
+    SDL_Surface* img_heroe;
+    SDL_Surface* img_heroeg;
+    SDL_Surface* img_heroeh;
+    SDL_Surface* img_heroeb;
+    SDL_Surface* img_gem;
+    SDL_Surface* img_enemy;
+    SDL_Surface* img_enemy2;
+    SDL_Surface* img_enemy3;
+    SDL_Surface* img_enemy4;
+    SDL_Surface* img_bucket;
+    SDL_Surface* img_balle;
+    SDL_Surface* img_bombe;
+  SDL_Surface* img_arm;
+    Entity heroe;
+   Entity balle;
+    Entity enemy;
+    Entity enemy2;
+    Entity enemy3;
+    Entity enemy4;
+    int direction;
+    int board[HEIGHT][WIDTH];
+    int ent_count[NENT];
+  int evalue[HEIGHT][WIDTH];
+  int space;
+  int bombe; 
+  int etat;
+} Data;
+
+enum { NORTH, SOUTH, EAST, WEST, NDIR };
+typedef struct {
+  int x;
+  int y;
+} Point;
+Point coor[NDIR] = { {0, -1}, {0, 1}, {1, 0}, {-1, 0} };
+
+SDL_Surface* load(const char* fileName) {
+  SDL_Surface *image = IMG_Load(fileName);
+  if (!image)
+  {
+     printf("IMG_Load: %s\n", IMG_GetError());
+     return 0;
+  }
+  return image;
+}
+
+
+int end_of_game(Data* data) {
+  return data->ent_count[GEM] == 0;
+}
+
+void add_gems(Data* data, int nb) {
+  int i;
+  for(i = 0; i < nb; i++) {
+    int x = rand() % WIDTH;
+    int y = rand() % HEIGHT;
+    if(data->board[y][x] == EMPTY && (x!=12 && y!=8) && (x!=12 && y!=9)  && (x!=4 && y!=7)) {
+      data->board[y][x] = GEM;
+    } else {
+      i--;
+    }
+  }
+  data->ent_count[GEM] = nb;
+}
+
+void init_data(Data* data) {
+  int x, y;
+  data->img_screen = SDL_SetVideoMode(WIDTH * ELMTSIZE, HEIGHT * ELMTSIZE, 32, SDL_ANYFORMAT);
+  
+  data->img_bombe = load("./explosion.png"); // relative path
+  data->img_wall = load("./KFC.png"); // relative path
+  data->img_gem = load("./orangina4.png"); // relative path
+  data->img_balle= load("./knife.png");
+  data->img_fond = load("./20081.jpg");
+  data->img_heroe = load("./pould.png"); // relative path
+  data->img_heroeg = load("./small.png");
+  data->img_heroeh = load("./poulh.png");
+  data->img_heroeb = load("./poulb.png");
+  data->img_bucket = load("./130.png");
+  data->img_enemy = load("./cuisse2.png"); // relative path
+  data->enemy.x = 13;
+  data->enemy.y = 8;
+  data->bombe=0;
+  data->img_arm = load("./Spatule.png");
+  //data->img_enemy2 = load("./kim.png"); // relative path
+  data->img_enemy2 = load("./cuisse2.png"); // relative path
+  data->enemy2.x = 14;
+  data->enemy2.y = 8;
+  
+  data->img_enemy3 = load("./KFC15.png"); // relative path
+  data->enemy3.x = 5;
+  data->enemy3.y = 7;
+
+  data->img_enemy4 = load("./cuisse2.png"); // relative path
+  //data->img_enemy4 = load("./ronald9.png"); // relative path
+  data->enemy4.x = 14;
+  data->enemy4.y = 8;
+  data->etat=0;
+
+  
+  data->direction=-1;
+  
+  data->heroe.x = 1;
+  data->heroe.y = 1;
+
+  for(x = 0; x < WIDTH; x++) {
+    for(y = 0; y < HEIGHT; y++) {
+      data->board[y][x] = level1[y][x]; 
+    }
+  }
+  for(x = 0; x < WIDTH; x++) {
+    for(y = 0; y < HEIGHT; y++) {
+      data->evalue[y][x] = level1[y][x]; 
+    }
+  }
+  for(x = 0; x < NENT; x++)
+    data->ent_count[x] = 0;
+  data->space=0;
+  add_gems(data, 10);
+
+  data->screen = LEVEL1;
+}
+
+int valid_pos(Data* data, int x, int y) {
+  return x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT && data->board[y][x] != WALL;
+}
+
+void move_entity(Data* data, Entity* e, int dir) {
+  int x = e->x + coor[dir].x;
+  int y = e->y + coor[dir].y;
+  if(valid_pos(data, x, y)) {
+    e->x = x;
+    e->y = y;
+  }
+}
+
+int valid_moves(Data* data, Entity* e, int* vm) {
+  int dir;
+  int c = 0;
+  for(dir = 0; dir < NDIR; dir++) {
+     int x = e->x + coor[dir].x;
+     int y = e->y + coor[dir].y;
+     if(valid_pos(data, x, y)) {
+       vm[c] = dir;
+       c++;
+     }
+  }
+  return c;
+}
+
+float euclid_dist(Entity* e, int x, int y) {
+  return sqrtf(powf(x - e->x, 2) + powf(y - e->y, 2)); 
+}
+
+int graphe_move(Data* data, Entity* e){
+  int vm[4];
+  int c = valid_moves(data, e, vm);
+  if(c == 0)
+    return -1;
+  int i;
+  int x,y;
+  int diff_HEIGHT;
+  int diff_WIDTH;
+  int WIDTHCOUNT=0;
+  int HEIGHTCOUNT=0;
+  int enemyY = e->y;
+  int enemyX = e->x;
+
+     diff_HEIGHT= enemyY - data->heroe.y;
+     diff_WIDTH= enemyX - data->heroe.x ;
+     HEIGHTCOUNT=0;
+     WIDTHCOUNT=0;
+  for(x = 0; x < WIDTH; x++) {
+    for(y = 0; y < HEIGHT; y++) {
+      data->evalue[y][x] = level1[y][x]; 
+    }
+  }
+
+  for(x = 0; x < WIDTH; x++) {
+    for(y = 0; y < HEIGHT; y++) {
+      if(level1[y][x]==1)data->evalue[y][x]=99;
+      else data->evalue[y][x]= abs(e->x-x)+ abs(e->y-y);
+    }
+  }
+  /*
+  printf("---------------------------------------------------\n");
+    for(y = 0; y < HEIGHT; y++) {
+      for(x = 0; x < WIDTH; x++) {
+      	 if(y==data->heroe.y && x==data->heroe.x)printf(" X ");
+       else printf("%2d ",data->evalue[y][x]);
+    }
+    printf("\n");
+
+  }
+  */
+  
+     // le cas avec une coresspondance
+        while(diff_HEIGHT || diff_WIDTH){
+	   if(diff_HEIGHT > 0){
+	     HEIGHTCOUNT--;
+	     diff_HEIGHT--;
+	   }
+	   if(diff_HEIGHT < 0){
+	     HEIGHTCOUNT++;
+	     diff_HEIGHT++;
+	   }
+	   if(diff_WIDTH > 0){
+	     WIDTHCOUNT--;
+	     diff_WIDTH--;
+	   }
+	   if(diff_WIDTH < 0){
+	     WIDTHCOUNT++;
+	     diff_WIDTH++;
+	   }
+	 }
+      printf("HEIGHT %d WIDTH %d \n",HEIGHTCOUNT,WIDTHCOUNT);
+      while(HEIGHTCOUNT || WIDTHCOUNT){
+	if(HEIGHTCOUNT<0){
+	  HEIGHTCOUNT++;
+
+	  if(!valid_pos(data,enemyX,enemyY-1)){
+	    printf("Je peux pas, je change WEST\n");
+	    return 3;
+	    //goto chagementdirection;
+	  }
+	    printf("NORTH\n");
+	  return 0;
+	}
+       if(WIDTHCOUNT>0){
+	  WIDTHCOUNT--;
+	  if(!valid_pos(data,enemyX+1,enemyY)&& !valid_pos(data,enemyX,enemyY-1)  ){printf("je rencontre 2murs, je change SOUTH\n");
+	    return 1;
+	  }
+	  if(!valid_pos(data,enemyX+1,enemyY)&&!valid_pos(data,enemyX-1,enemyY)&&!valid_pos(data,enemyX,enemyY-2)&&!valid_pos(data,enemyX+1,enemyY-1)){         printf(" Je descends SOUTH\n");
+	     return 1;
+	  }	  
+	  if(!valid_pos(data,enemyX+1,enemyY)){
+	  printf("Je peux pas, je change NORTH \n");
+	  return 0;
+	  }
+	  printf("EAST\n");
+	  return 2;
+	}
+	if(HEIGHTCOUNT>0){
+	  HEIGHTCOUNT--;
+	 
+	  if(!valid_pos(data,enemyX,enemyY+1)){
+	  printf("Je peux pas, je change EAST \n");
+	  return 2;
+	  }
+	  printf("SOUTH\n");
+	  return 1;
+	}	
+      	if(WIDTHCOUNT<0){
+	  WIDTHCOUNT++;
+	  if(!valid_pos(data,enemyX-1,enemyY)){
+	  printf("Je peux pas, je change SOUTH \n");
+	  return 1;
+	  }
+	  printf("WEST\n");
+	  return 3;
+	}
+       }
+
+}
+
+
+int permutation_move(Data* data, Entity* e){
+int vm[4];
+  int c = valid_moves(data, e, vm);
+  if(c == 0)
+    return -1;
+    int i,j;
+  int x,y;
+  int diff_HEIGHT;
+  int diff_WIDTH;
+  int WIDTHCOUNT=0;
+  int HEIGHTCOUNT=0;
+  int countX=0;
+  int countY=0;
+  int enemyY = e->y;//e->y;
+  int enemyX = e->x;//e->x;
+  int heroY= data->heroe.y;
+  int heroX= data->heroe.x;
+  int direction[5];
+  int avance=0;
+  for(x = 0; x < WIDTH; x++) {
+   for(y = 0; y < HEIGHT; y++) {
+      data->evalue[y][x] = level1[y][x]; 
+    }
+  }
+
+  for(x = 0; x < WIDTH; x++) {
+    for(y = 0; y < HEIGHT; y++) {
+      if(level1[y][x]==1)data->evalue[y][x]=99;
+      else data->evalue[y][x]= abs(enemyX-x)+ abs(enemyY-y); 
+    }
+  }
+  /*
+   printf("---------------------------------------------------\n");
+
+    for(y = 0; y < HEIGHT; y++) {
+      for(x = 0; x < WIDTH; x++) {
+      	 if(y==heroY && x==heroX)printf(" X ");
+       else printf("%2d ",data->evalue[y][x]);
+    }
+    printf("\n");
+
+  }
+ printf("---------------------------------------------------\n");
+*/
+     diff_HEIGHT= enemyY - heroY;
+     diff_WIDTH= enemyX - heroX ;
+     HEIGHTCOUNT=0;
+     WIDTHCOUNT=0;
+
+
+        while(diff_HEIGHT || diff_WIDTH){
+	   if(diff_HEIGHT > 0){
+	     HEIGHTCOUNT--;
+	     diff_HEIGHT--;
+	   }
+	   if(diff_HEIGHT < 0){
+	     HEIGHTCOUNT++;
+	     diff_HEIGHT++;
+	   }
+	   if(diff_WIDTH > 0){
+	     WIDTHCOUNT--;
+	     diff_WIDTH--;
+	   }
+	   if(diff_WIDTH < 0){
+	     WIDTHCOUNT++;
+	     diff_WIDTH++;
+	   }
+	 }
+
+      printf("Les deplacements necessaires de l'enemie = 0 au jouer = X \n");
+      printf("Le plus court : HEIGHT %d WIDTH %d \n",HEIGHTCOUNT,WIDTHCOUNT);
+
+  int permutation[4][4*abs(HEIGHT)*abs(WIDTH)];
+  int count=0;
+  int indice=0;
+      if(HEIGHTCOUNT==0 || WIDTHCOUNT==0)goto normal;
+
+  y=HEIGHTCOUNT;
+  x=WIDTHCOUNT;
+  for(i=0; i<abs(y); i++){
+    for(j=0; j<abs(x); j++){
+      if(x>0 && y>0){
+      permutation[0][indice]=i;
+      permutation[1][indice]=j;
+      permutation[2][indice]=y-i;
+      permutation[3][indice]=x-j;}
+      if(x>0 && y<0){
+      permutation[0][indice]=i;
+      permutation[1][indice]=-j;
+      permutation[2][indice]=y-i;
+      permutation[3][indice]=x+j;
+      }
+      if(x<0 && y>0){
+      permutation[0][indice]=-i;
+      permutation[1][indice]=j;
+      permutation[2][indice]=y+i;
+      permutation[3][indice]=x-j;}     
+      if(x<0 && y<0){
+      permutation[0][indice]=-i;
+      permutation[1][indice]=-j;
+      permutation[2][indice]=y+i;
+      permutation[3][indice]=x+j;}
+      indice++;
+    }
+  }
+  for(i=0; i<abs(y); i++){
+    for(j=0; j<abs(x); j++){
+     if(x>0 && y>0){
+      permutation[0][indice]=j;
+      permutation[1][indice]=i;
+      permutation[2][indice]=x-j;
+      permutation[3][indice]=y-i;}
+     if(x>0 && y<0){
+      permutation[0][indice]=-j;
+      permutation[1][indice]=i;
+      permutation[2][indice]=x+j;
+      permutation[3][indice]=y-i;}
+     if(x<0 && y>0){
+      permutation[0][indice]=j;
+      permutation[1][indice]=-i;
+      permutation[2][indice]=x-j;
+      permutation[3][indice]=y+i;}
+     if(x<0 && y<0){
+      permutation[0][indice]=-j;
+      permutation[1][indice]=-i;
+      permutation[2][indice]=y+j;
+      permutation[3][indice]=x+i;
+     }
+      indice++;
+    }
+  }
+    
+  for(i=0; i<abs(y); i++){
+    for(j=0; j<abs(x)/2+1; j++){
+      if(x>0 && y>0){
+      permutation[0][indice]=y-i;
+      permutation[1][indice]=x-j;
+      permutation[2][indice]=i;
+      permutation[3][indice]=j;}
+      if(x>0 && y<0){
+      permutation[0][indice]=y-i;
+      permutation[1][indice]=x+j;
+      permutation[2][indice]=i;
+      permutation[3][indice]=-j;}
+      if(x<0 && y>0){
+      permutation[0][indice]=y+i;
+      permutation[1][indice]=x-j;
+      permutation[2][indice]=-i;
+      permutation[3][indice]=j;}
+      if(x<0 && y<0){
+      permutation[0][indice]=y+i;
+      permutation[1][indice]=x+j;
+      permutation[2][indice]=-i;
+      permutation[3][indice]=-j;}
+      indice++;
+    }
+  }
+  
+  for(i=0; i<abs(y); i++){
+    for(j=0; j<abs(x)/2+1; j++){
+      if(x>0 && y>0){
+      permutation[0][indice]=x-j;
+      permutation[1][indice]=y-i;
+      permutation[2][indice]=j;
+      permutation[3][indice]=i;}
+      if(x<0 && y>0){
+      permutation[0][indice]=x-j;
+      permutation[1][indice]=y+i;
+      permutation[2][indice]=j;
+      permutation[3][indice]=-i;}
+      if(x>0 && y<0){
+      permutation[0][indice]=x+j;
+      permutation[1][indice]=y-i;
+      permutation[2][indice]=-j;
+      permutation[3][indice]=i;}
+      if(x<0 && y<0){
+      permutation[0][indice]=x+j;
+      permutation[1][indice]=y+i;
+      permutation[2][indice]=-j;
+      permutation[3][indice]=-i;}
+      indice++;
+    }
+    }
+  printf("Possibilité : %d\n",indice);
+  /*
+  for(i=0; i< 4*abs(x)*abs(y); i++){
+    printf("%d ",permutation[0][i]);
+    printf("%d ",permutation[1][i]);
+    printf("%d ",permutation[2][i]);
+    printf("%d ",permutation[3][i]);
+    printf("\n");
+    }
+  */
+  // printf("indice %d\n",indice);
+  // printf(" e %d\n",evalue[enemyY-1][enemyX]);
+  
+
+  
+    count=0;
+  if(HEIGHTCOUNT > 0 && data->evalue[enemyY-1][enemyX]==99)goto commence_par_X;
+  if(HEIGHTCOUNT > 0 && data->evalue[enemyY+1][enemyX]==99)goto commence_par_X;
+  
+ commence_par_Y:
+    countY=0;
+    countX=0;
+    for(i=0; i<4;i++)direction[i]=permutation[i][count];
+    while(0!=permutation[0][count]){
+      if(permutation[0][count]>0){permutation[0][count]-=1;countY-=1;}
+      if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;goto commence_par_Y;}
+      if(permutation[0][count]<0){permutation[0][count]++;countY++;}
+      if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;goto commence_par_Y;}
+    }
+    while(0!=permutation[1][count]){
+      if(permutation[1][count]>0){permutation[1][count]-=1;countX-=1;} 
+      if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;goto commence_par_Y;}
+      if(permutation[1][count]<0){permutation[1][count]++;countX++;}
+      if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;goto commence_par_Y;}
+    }
+    while(0!=permutation[2][count]){
+     if(permutation[2][count]>0){permutation[2][count]-=1;countY-=1;}
+     if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;goto commence_par_Y;}
+     if(permutation[2][count]<0){permutation[2][count]++;countY++;}
+     if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;goto commence_par_Y;}
+   }
+    while(0!=permutation[3][count]){
+      if(permutation[3][count]>0){permutation[3][count]-=1;countX-=1;} 
+      if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;goto commence_par_Y;}
+      if(permutation[3][count]<0){permutation[3][count]++;countX++;}
+      if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;goto commence_par_Y;}
+    }
+    if(indice<=count){printf("je n'ai pas trouvé 5 correspondance :(\n");
+          srand(time(NULL));
+      return rand()%4;}
+    if(!permutation[0][count]&& !permutation[1][count]&& !permutation[2][count] && !permutation[3][count])goto solution_trouve;
+    else goto commence_par_Y;
+ solution_trouve:
+    printf("La fois de coups examinés : %d\n",count);
+    printf("Direction valable\n");
+    printf("Y1 %d,",direction[0]);	 
+    printf("X2 %d\n",direction[1]);
+    printf("Y3 %d,",direction[2]);
+    printf("X4 %d\n",direction[3]);
+ for(i=0; i<4 ;i++){
+      if(i%2==1){
+	if(direction[i]!=0 && direction[i] > 0)return 2;
+      if(direction[i]!=0 && direction[i] < 0)return 3;
+      }else{
+      if(direction[i]!=0 && direction[i] > 0)return 1;
+      if(direction[i]!=0 && direction[i] < 0)return 0;
+      }
+    } 
+
+commence_par_X:
+    countY=0;
+    countX=0;
+    for(i=0; i<4;i++)direction[i]=permutation[i][count];
+    while(0!=permutation[0][count]){
+      if(permutation[0][count]>0){permutation[0][count]-=1;countX-=1;}
+      if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;goto commence_par_X;}
+      if(permutation[0][count]<0){permutation[0][count]++;countX++;}
+      if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;goto commence_par_X;}
+    }
+    while(0!=permutation[1][count]){
+      if(permutation[1][count]>0){permutation[1][count]-=1;countY-=1;}
+      if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;goto commence_par_X;}
+      if(permutation[1][count]<0){permutation[1][count]++;countY++;}
+     if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;;goto commence_par_X;}
+    }
+    while(0!=permutation[2][count]){
+      if(permutation[2][count]>0){permutation[2][count]-=1;countX-=1;}
+      if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;goto commence_par_X;}
+      if(permutation[2][count]<0){permutation[2][count]++;countX++;}
+      if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;goto commence_par_X;}
+    }
+    while(0!=permutation[3][count]){
+     if(permutation[3][count]>0){permutation[3][count]-=1;countY-=1;}
+     if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;goto commence_par_X;}
+     if(permutation[3][count]<0){permutation[3][count]++;countY++;}
+     if(data->evalue[enemyY-countY][enemyX-countX]==99){count++;goto commence_par_X;}
+   }
+    if(indice<=count){printf("je n'ai pas trouvé 5 correspondance :(\n");
+      srand(time(NULL));
+      return rand()%4;}
+    if(!permutation[0][count]&& !permutation[1][count]&& !permutation[2][count] && !permutation[3][count])goto solution_trouve2;
+    else goto commence_par_X;
+ solution_trouve2:
+    printf("La fois de coups examinés : %d\n",count);
+    printf("Direction valable\n");
+    printf("X1 %d,",direction[0]);	 
+    printf("Y2 %d\n",direction[1]);
+    printf("X3 %d,",direction[2]);
+    printf("Y4 %d\n",direction[3]);
+    for(i=0; i<4 ;i++){
+      if(i%2==0){
+      if(direction[i]!=0 && direction[i] > 0)return 2;
+      if(direction[i]!=0 && direction[i] < 0)return 3;
+      }else{
+      if(direction[i]!=0 && direction[i] > 0)return 1;
+      if(direction[i]!=0 && direction[i] < 0)return 0;
+      }
+    }
+
+ normal:
+   while(HEIGHTCOUNT || WIDTHCOUNT){
+	if(HEIGHTCOUNT<0){
+	  HEIGHTCOUNT++;
+
+	  if(!valid_pos(data,enemyX,enemyY-1)){
+	    printf("Je peux pas, je change WEST\n");
+	    return 3;
+	    //goto chagementdirection;
+	  }
+	    printf("NORTH\n");
+	  return 0;
+	}
+       if(WIDTHCOUNT>0){
+	  WIDTHCOUNT--;
+	  if(!valid_pos(data,enemyX+1,enemyY)&& !valid_pos(data,enemyX,enemyY-1)  ){printf("je rencontre 2murs, je change SOUTH\n");
+	    return 1;
+	  }
+	  if(!valid_pos(data,enemyX+1,enemyY)&&!valid_pos(data,enemyX-1,enemyY)&&!valid_pos(data,enemyX,enemyY-2)&&!valid_pos(data,enemyX+1,enemyY-1)){         printf(" Je descends SOUTH\n");
+	     return 1;
+	  }	  
+	  if(!valid_pos(data,enemyX+1,enemyY)){
+	  printf("Je peux pas, je change NORTH \n");
+	  return 0;
+	  }
+	  printf("EAST\n");
+	  return 2;
+	}
+	if(HEIGHTCOUNT>0){
+	  HEIGHTCOUNT--;
+	 
+	  if(!valid_pos(data,enemyX,enemyY+1)){
+	  printf("Je peux pas, je change EAST \n");
+	  return 2;
+	  }
+	  printf("SOUTH\n");
+	  return 1;
+	}	
+      	if(WIDTHCOUNT<0){
+	  WIDTHCOUNT++;
+	  if(!valid_pos(data,enemyX-1,enemyY)){
+	  printf("Je peux pas, je change SOUTH \n");
+	  return 1;
+	  }
+	  printf("WEST\n");
+	  return 3;
+	}
+       }
+
+
+    
+
+}
+
+int euristic_move(Data* data, Entity* e) {
+  int vm[4];
+  int c = valid_moves(data, e, vm);
+  if(c == 0)
+    return -1;
+  int i,j;
+  int best = -1;
+  float dist_mini = HEIGHT * WIDTH;
+  for(i = 0; i < c; i++) {
+    int dir = vm[i];
+    int x = e->x + coor[dir].x;
+    int y = e->y + coor[dir].y;
+    float ed = euclid_dist(&data->heroe, x, y);
+    if(ed < dist_mini) {
+      dist_mini = ed;
+      best = dir;
+    }
+  }
+  
+  return best;
+}
+
+int random_move(Data* data, Entity* e) {
+  int vm[4];
+  int c = valid_moves(data, e, vm);
+  if(c == 0)
+    return -1;
+  return vm[rand() % c];
+}
+
+void board(Data* data,int z) {
+  int x, y;
+  int i;
+  int tmp;
+      SDL_Rect pos;
+      pos.x=0;
+      pos.y=0;
+      SDL_BlitSurface (data->img_fond, NULL, data->img_screen, &pos);
+      
+  for(x = 0; x < WIDTH; x++) {
+    for(y = 0; y < HEIGHT; y++) {
+      SDL_Rect position;
+      position.x = x * ELMTSIZE;
+      position.y = y * ELMTSIZE;
+      if(data->board[y][x] == WALL)
+        SDL_BlitSurface (data->img_wall, NULL, data->img_screen, &position);
+      else if(data->board[y][x] == GEM){
+      position.x = x * ELMTSIZE;
+      position.y = y * ELMTSIZE-5;
+        SDL_BlitSurface (data->img_gem, NULL, data->img_screen, &position);
+	
+      }
+    }
+  }
+
+  pos.x = 13 * ELMTSIZE;
+  pos.y = 8 * ELMTSIZE+10;
+  SDL_BlitSurface(data->img_bucket, NULL, data->img_screen, &pos);
+
+  
+  SDL_Rect position;
+  if(data->space>0){
+  position.x = data->balle.x * ELMTSIZE;
+  position.y = data->balle.y * ELMTSIZE;
+  SDL_BlitSurface (data->img_balle, NULL, data->img_screen, &position);
+  }
+  switch(data->direction){
+  case 0:
+  position.x = data->heroe.x * ELMTSIZE-10;
+  position.y = data->heroe.y * ELMTSIZE-10;
+  SDL_BlitSurface (data->img_heroeh, NULL, data->img_screen, &position);
+  break;
+  case 1:
+  position.x = data->heroe.x * ELMTSIZE-10;
+  position.y = data->heroe.y * ELMTSIZE-10;
+  SDL_BlitSurface (data->img_heroeb, NULL, data->img_screen, &position);
+  break;
+  case 2:
+  position.x = data->heroe.x * ELMTSIZE-10;
+  position.y = data->heroe.y * ELMTSIZE-10;
+  SDL_BlitSurface (data->img_heroeg, NULL, data->img_screen, &position);
+  break;
+  case 3:
+    position.x = data->heroe.x * ELMTSIZE-10 + z;
+  position.y = data->heroe.y * ELMTSIZE-10;
+  SDL_BlitSurface (data->img_heroe, NULL, data->img_screen, &position);
+  break;
+  default:
+  position.x = data->heroe.x * ELMTSIZE-10;
+  position.y = data->heroe.y * ELMTSIZE-10;
+  SDL_BlitSurface (data->img_heroe, NULL, data->img_screen, &position);
+  break;
+  }
+  /*
+  position.x = data->heroe.x * ELMTSIZE+15;
+  position.y = data->heroe.y * ELMTSIZE+15;
+  SDL_BlitSurface (data->img_arm, NULL, data->img_screen, &position);
+  */
+  position.x = data->enemy.x * ELMTSIZE;
+  position.y = data->enemy.y * ELMTSIZE;
+  SDL_BlitSurface (data->img_enemy, NULL, data->img_screen, &position);
+  
+  
+  position.x = data->enemy2.x * ELMTSIZE-5;
+  position.y = data->enemy2.y * ELMTSIZE+10;
+  SDL_BlitSurface (data->img_enemy2, NULL, data->img_screen, &position);
+  
+  
+  position.x = data->enemy4.x * ELMTSIZE-10;
+  position.y = data->enemy4.y * ELMTSIZE-5;
+  SDL_BlitSurface (data->img_enemy4, NULL, data->img_screen, &position);
+  position.x = data->enemy3.x * ELMTSIZE;
+  position.y = data->enemy3.y * ELMTSIZE;
+  SDL_BlitSurface (data->img_enemy3, NULL, data->img_screen, &position);
+  /*
+  if(data->heroe.y==data->enemy.y && data->heroe.x== data->enemy.x){
+  position.x = data->enemy.x * ELMTSIZE-50;
+  position.y = data->enemy.y * ELMTSIZE-50;
+  SDL_BlitSurface (data->img_bombe, NULL, data->img_screen, &position);
+  }
+  
+if(data->heroe.y==data->enemy2.y && data->heroe.x== data->enemy2.x){
+  position.x = data->enemy2.x * ELMTSIZE-50;
+  position.y = data->enemy2.y * ELMTSIZE-50;
+  SDL_BlitSurface (data->img_bombe, NULL, data->img_screen, &position);
+  }
+  if(data->heroe.y==data->enemy3.y && data->heroe.x== data->enemy3.x){
+  position.x = data->enemy3.x * ELMTSIZE-50;
+  position.y = data->enemy3.y * ELMTSIZE-50;
+  SDL_BlitSurface (data->img_bombe, NULL, data->img_screen, &position);
+  }
+  if(data->heroe.y==data->enemy4.y && data->heroe.x== data->enemy4.x){
+  position.x = data->enemy4.x * ELMTSIZE-50;
+  position.y = data->enemy4.y * ELMTSIZE-50;
+  SDL_BlitSurface (data->img_bombe, NULL, data->img_screen, &position);
+  }
+  */
+  
+  //printf(" balle %d %d , enemy %d %d\n",data->balle.y,data->balle.x,data->enemy4.y,data->enemy4.x,data->bombe);
+  if(data->balle.y==data->enemy4.y && data->balle.x ==data->enemy4.x){
+  position.x = data->balle.x * ELMTSIZE-50;
+  position.y = data->balle.y * ELMTSIZE-50;
+  SDL_BlitSurface (data->img_bombe, NULL, data->img_screen, &position);
+  data->space=0;
+  data->etat=1;
+  }
+
+  //printf(" balle %d %d , enemy %d %d\n",data->balle.y,data->balle.x,data->enemy.y,data->enemy.x,data->bombe);
+  if(data->balle.y==data->enemy.y && data->balle.x ==data->enemy.x){
+  position.x = data->balle.x * ELMTSIZE-50;
+  position.y = data->balle.y * ELMTSIZE-50;
+  SDL_BlitSurface (data->img_bombe, NULL, data->img_screen, &position);
+  data->space=0;
+  data->etat=1;
+  }
+
+  //printf(" balle %d %d , enemy %d %d\n",data->balle.y,data->balle.x,data->enemy2.y,data->enemy2.x,data->bombe);
+  if(data->balle.y==data->enemy2.y && data->balle.x == data->enemy2.x){
+  position.x = data->balle.x * ELMTSIZE-50;
+  position.y = data->balle.y * ELMTSIZE-50;
+  SDL_BlitSurface (data->img_bombe, NULL, data->img_screen, &position);
+  data->space=0;
+  data->etat=1;
+  }
+  if(data->balle.y==data->enemy3.y && data->balle.x == data->enemy3.x){
+  position.x = data->balle.x * ELMTSIZE-50;
+  position.y = data->balle.y * ELMTSIZE-50;
+  SDL_BlitSurface (data->img_bombe, NULL, data->img_screen, &position);
+  data->space=0;
+  data->etat=1;
+  }
+//printf("etat %d\n",data->etat);
+/*
+if(data->etat==1){
+data->balle.x=0;
+data->balle.y=0;
+data->etat=0;
+}
+*/
+}
+//
+void get_gem(Data* data) {
+  if(data->board[data->heroe.y][data->heroe.x] == GEM) {
+    data->board[data->heroe.y][data->heroe.x] = EMPTY;
+    data->ent_count[GEM]--;  }
+}
+
+void loop_game_over(Data* data) {
+      SDL_FillRect(data->img_screen, NULL, SDL_MapRGB(data->img_screen->format, 0, 0, 0));
+}
+//
+void loop_level1(Data* data) {
+  int i=0;
+  SDL_FillRect(data->img_screen, NULL, SDL_MapRGB(data->img_screen->format, 0, 0, 0));
+  for(i=0; i< 10 ;i++){
+    board(data,i);
+  SDL_Flip(data->img_screen);}
+  SDL_Event event;
+  if(SDL_PollEvent(&event)) {
+    switch (event.type) {
+      case SDL_KEYDOWN:
+        switch(event.key.keysym.sym) {
+          case SDLK_RIGHT:
+	  data->direction=3;
+	  SDL_LockSurface(data->img_screen);
+          move_entity(data, &data->heroe, EAST);
+          SDL_UnlockSurface(data->img_screen);
+	  break;
+          case SDLK_LEFT:
+	  data->direction=2;
+          SDL_LockSurface(data->img_screen);
+          move_entity(data, &data->heroe, WEST);
+          SDL_UnlockSurface(data->img_screen);
+          break;
+          case SDLK_UP:
+	  data->direction=0;
+          SDL_LockSurface(data->img_screen);
+          move_entity(data, &data->heroe, NORTH);
+          SDL_UnlockSurface(data->img_screen);
+          break;
+          case SDLK_DOWN:
+	  data->direction=1;
+          SDL_LockSurface(data->img_screen);
+          move_entity(data, &data->heroe, SOUTH);
+          SDL_UnlockSurface(data->img_screen);
+	  break;
+	  case SDLK_SPACE:
+          SDL_LockSurface(data->img_screen);
+	  move_entity(data, &data->balle, EAST);	  
+          SDL_UnlockSurface(data->img_screen);
+       	  data->balle.y=data->heroe.y;
+	  data->balle.x=data->heroe.x;
+	  switch(data->direction){
+	  case 0:
+	  data->space=1;
+          break;
+	  case 1:
+	  data->space=2;
+          break;
+	  case 2:
+	  data->space=3;
+          break;
+	  case 3:
+	  data->space=4;
+          break;
+          default:
+	    break;
+	}
+          default: break;
+       }
+	if(data->space==1)move_entity(data, &data->balle, NORTH);
+	if(data->space==2)move_entity(data, &data->balle, SOUTH);
+	if(data->space==3)move_entity(data, &data->balle, WEST);
+	if(data->space==4)move_entity(data, &data->balle, EAST);
+	if(data->balle.y==data->enemy4.y && data->balle.x == data->enemy4.x){
+	  data->bombe=4;
+          data->enemy4.x = 13;
+          data->enemy4.y = 8;
+	}
+	 if(data->balle.y==data->enemy3.y && data->balle.x == data->enemy3.x){
+	  data->bombe=3; 
+	  data->enemy3.x = 13;
+	  data->enemy3.y = 8;
+	}
+	if(data->balle.y==data->enemy2.y && data->balle.x == data->enemy2.x){
+	  data->bombe=2;
+	  data->enemy2.x = 13;
+	  data->enemy2.y = 8;
+	  }
+	if(data->balle.y==data->enemy.y && data->balle.x == data->enemy.x){
+	  data->bombe=1;
+	  data->enemy.x = 13;
+	  data->enemy.y = 8;
+	}
+	if(data->etat==1){
+	data->balle.x=13;
+	data->balle.y=16;
+	data->etat=0;}
+       get_gem(data);
+	move_entity(data, &data->enemy, graphe_move(data, &data->enemy));
+	move_entity(data, &data->enemy4, euristic_move(data, &data->enemy4));
+	move_entity(data, &data->enemy3, random_move(data, &data->enemy3));
+        move_entity(data, &data->enemy2, permutation_move(data, &data->enemy2));
+		
+       if(end_of_game(data))
+         data->screen = GAMEOVER;
+       break;
+       default: break;
+    }
+  }
+
+  //SDL_Quit();
+}
+
+void renderloop(void* arg) {
+  Data* data = arg;
+  switch(data->screen) {
+    case LEVEL1:
+      loop_level1(data);
+      break;
+    case GAMEOVER:
+      loop_game_over(data);
+      break;
+    default: break;
+  }
+}
+
+
+int main() {
+  Data* data = malloc(sizeof *data);
+  SDL_Init(SDL_INIT_VIDEO);
+
+  init_data(data);
+ SDL_Flip(data->img_screen);
+
+  printf("you should see an image.\n");
+
+  emscripten_set_main_loop_arg(renderloop, data, 0, 0);
+
+  return 0;
+}
+
